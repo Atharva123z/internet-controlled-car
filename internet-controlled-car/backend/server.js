@@ -9,7 +9,7 @@ const port = 3000; // The port the server will run on
 // Use a public broker for testing, or your own self-hosted one
 const MQTT_BROKER_URL = 'mqtt://broker.hivemq.com'; 
 // !!! CRITICAL: Set a unique topic to avoid conflicts with others !!!
-const MQTT_TOPIC = '/your_unique_project_name/car/control'; 
+const MQTT_TOPIC = '/internet-controlled-car/car/control'; 
 // ---------------------------------------------
 
 // Connect to MQTT Broker
@@ -68,3 +68,4 @@ app.listen(port, () => {
     console.log(`MQTT Topic: ${MQTT_TOPIC}`);
 
 });
+
