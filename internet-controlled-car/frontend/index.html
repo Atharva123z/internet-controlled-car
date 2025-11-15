@@ -328,6 +328,20 @@
             box-shadow: 0 4px 8px rgba(108, 92, 231, 0.3);
         }
         
+        .emergency-stop {
+            background: linear-gradient(135deg, var(--danger-color), #e84393);
+            color: white;
+            font-size: 1.1rem;
+            font-weight: bold;
+            padding: 15px 30px;
+            margin: 10px 0;
+        }
+        
+        .emergency-stop:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(214, 48, 49, 0.3);
+        }
+        
         footer {
             text-align: center;
             padding: 20px;
@@ -399,16 +413,17 @@
                         <li>Car stops automatically when keys are released</li>
                         <li>Adjust speed with the slider</li>
                         <li>Press Stop button for immediate halt</li>
+                        <li>EMERGENCY STOP for immediate safety stop</li>
                     </ul>
                 </div>
                 
                 <div style="margin-top: 40px;">
                     <h2>System Status</h2>
                     <div style="margin-top: 15px;">
-                        <p><strong>ESP32:</strong> Connected</p>
-                        <p><strong>Motors:</strong> Operational</p>
-                        <p><strong>Steering:</strong> Responsive</p>
-                        <p><strong>Battery:</strong> 87%</p>
+                        <p><strong>ESP32:</strong> <span id="esp32-status">Connecting...</span></p>
+                        <p><strong>Motors:</strong> <span id="motor-status">Initializing...</span></p>
+                        <p><strong>Steering:</strong> <span id="steering-status">Ready</span></p>
+                        <p><strong>Battery:</strong> <span id="battery-status">N/A</span></p>
                     </div>
                 </div>
             </div>
@@ -429,7 +444,7 @@
             <div class="status-bar">
                 <div class="status-card">
                     <h3>Connection Status</h3>
-                    <p><span class="status-indicator connected"></span> Connected to Car</p>
+                    <p><span class="status-indicator disconnected" id="connection-indicator"></span> <span id="connection-status">Disconnected</span></p>
                 </div>
                 <div class="status-card">
                     <h3>Car Status</h3>
@@ -447,6 +462,9 @@
             
             <div class="control-section">
                 <h2>Control Panel</h2>
+                
+                <button class="btn emergency-stop" id="emergency-stop">🛑 EMERGENCY STOP</button>
+                
                 <div class="d-pad">
                     <button class="control-btn forward" id="btn-forward">↑</button>
                     <button class="control-btn left" id="btn-left">←</button>
@@ -461,6 +479,7 @@
                     <div class="key">S / ↓</div>
                     <div class="key">D / →</div>
                     <div class="key">Space = Stop</div>
+                    <div class="key">E = Emergency Stop</div>
                 </div>
                 
                 <div class="speed-control">
@@ -479,13 +498,10 @@
                     <h2>Command Log</h2>
                     <div class="log" id="command-log">
                         <div class="log-entry">
-                            <span class="log-time">[12:30:45]</span> System initialized
+                            <span class="log-time" id="current-time"></span> System initialized
                         </div>
                         <div class="log-entry">
-                            <span class="log-time">[12:30:47]</span> Connected to MQTT broker
-                        </div>
-                        <div class="log-entry">
-                            <span class="log-time">[12:30:50]</span> Car status: Ready
+                            <span class="log-time" id="current-time2"></span> Ready for commands
                         </div>
                     </div>
                 </div>
@@ -493,12 +509,16 @@
                 <div class="card">
                     <h2>Settings</h2>
                     <div class="settings-group">
+                        <label for="backend-url">Backend Server URL</label>
+                        <input type="text" id="backend-url" value="https://car-backend-n2kw.onrender.com">
+                    </div>
+                    <div class="settings-group">
                         <label for="mqtt-broker">MQTT Broker</label>
                         <input type="text" id="mqtt-broker" value="broker.hivemq.com">
                     </div>
                     <div class="settings-group">
                         <label for="mqtt-topic">Command Topic</label>
-                        <input type="text" id="mqtt-topic" value="/car/control">
+                        <input type="text" id="mqtt-topic" value="/internet-controlled-car/car/control">
                     </div>
                     <div class="settings-group">
                         <label for="steering-sensitivity">Steering Sensitivity</label>
@@ -525,6 +545,7 @@
         const btnLeft = document.getElementById('btn-left');
         const btnRight = document.getElementById('btn-right');
         const btnStop = document.getElementById('btn-stop');
+        const emergencyStop = document.getElementById('emergency-stop');
         const speedSlider = document.getElementById('speed-slider');
         const speedValue = document.getElementById('speed-value');
         const currentSpeed = document.getElementById('current-speed');
@@ -535,17 +556,23 @@
         const themeToggle = document.getElementById('theme-toggle');
         const themeIcon = document.getElementById('theme-icon');
         const themeText = document.getElementById('theme-text');
+        const connectionIndicator = document.getElementById('connection-indicator');
+        const connectionStatus = document.getElementById('connection-status');
+        const backendUrlInput = document.getElementById('backend-url');
         
         // State variables
         let currentSpeedValue = 150;
-        let isConnected = true;
+        let isConnected = false;
         let activeKey = null;
         let isDarkMode = true;
+        let connectionCheckInterval;
         
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             updateSpeedDisplay();
             setupEventListeners();
+            setCurrentTime();
+            startConnectionMonitoring();
         });
         
         function setupEventListeners() {
@@ -555,6 +582,7 @@
             btnLeft.addEventListener('mousedown', () => sendCommand('L'));
             btnRight.addEventListener('mousedown', () => sendCommand('R'));
             btnStop.addEventListener('click', () => sendCommand('S'));
+            emergencyStop.addEventListener('click', emergencyStopCar);
             
             // Add touch events for mobile
             btnForward.addEventListener('touchstart', (e) => {
@@ -623,6 +651,22 @@
             }
         }
         
+        function emergencyStopCar() {
+            // Visual feedback
+            emergencyStop.classList.add('active');
+            setTimeout(() => emergencyStop.classList.remove('active'), 500);
+            
+            // Send emergency stop command
+            sendCommand('S');
+            addToLog('🛑 EMERGENCY STOP ACTIVATED');
+            carStatus.textContent = 'EMERGENCY STOP';
+            
+            // Reset all buttons
+            [btnForward, btnBackward, btnLeft, btnRight, btnStop].forEach(btn => {
+                btn.classList.remove('active');
+            });
+        }
+        
         function highlightButton(command) {
             // Remove active state from all buttons first
             [btnForward, btnBackward, btnLeft, btnRight, btnStop].forEach(btn => {
@@ -668,15 +712,33 @@
         }
         
         function saveSettings() {
+            const backendUrl = backendUrlInput.value;
             const broker = document.getElementById('mqtt-broker').value;
             const topic = document.getElementById('mqtt-topic').value;
             const sensitivity = document.getElementById('steering-sensitivity').value;
             
-            // In a real implementation, this would save to localStorage or send to backend
-            addToLog(`Settings saved: Broker=${broker}, Topic=${topic}, Sensitivity=${sensitivity}`);
+            // Save to localStorage
+            localStorage.setItem('carBackendUrl', backendUrl);
+            localStorage.setItem('carMqttBroker', broker);
+            localStorage.setItem('carMqttTopic', topic);
+            localStorage.setItem('carSensitivity', sensitivity);
+            
+            addToLog(`Settings saved: Backend=${backendUrl}, Broker=${broker}, Topic=${topic}, Sensitivity=${sensitivity}`);
             
             // Show confirmation
             alert('Settings saved successfully!');
+        }
+        
+        function loadSettings() {
+            const savedBackendUrl = localStorage.getItem('carBackendUrl');
+            const savedBroker = localStorage.getItem('carMqttBroker');
+            const savedTopic = localStorage.getItem('carMqttTopic');
+            const savedSensitivity = localStorage.getItem('carSensitivity');
+            
+            if (savedBackendUrl) backendUrlInput.value = savedBackendUrl;
+            if (savedBroker) document.getElementById('mqtt-broker').value = savedBroker;
+            if (savedTopic) document.getElementById('mqtt-topic').value = savedTopic;
+            if (savedSensitivity) document.getElementById('steering-sensitivity').value = savedSensitivity;
         }
         
         function toggleTheme() {
@@ -705,6 +767,53 @@
             }
         }
         
+        function setCurrentTime() {
+            const now = new Date();
+            const timeString = `[${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}]`;
+            document.getElementById('current-time').textContent = timeString;
+            document.getElementById('current-time2').textContent = timeString;
+        }
+        
+        function startConnectionMonitoring() {
+            // Check connection status every 5 seconds
+            connectionCheckInterval = setInterval(() => {
+                checkBackendConnection();
+            }, 5000);
+            
+            // Initial check
+            checkBackendConnection();
+        }
+        
+        function checkBackendConnection() {
+            const backendUrl = backendUrlInput.value;
+            
+            fetch(backendUrl, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            })
+            .then(response => {
+                if (response.ok) {
+                    updateConnectionStatus(true, 'Connected to Car');
+                } else {
+                    updateConnectionStatus(false, 'Backend Error');
+                }
+            })
+            .catch((error) => {
+                updateConnectionStatus(false, 'Connection Failed');
+            });
+        }
+        
+        function updateConnectionStatus(connected, message) {
+            isConnected = connected;
+            connectionIndicator.className = connected ? 'status-indicator connected' : 'status-indicator disconnected';
+            connectionStatus.textContent = message;
+            
+            document.getElementById('esp32-status').textContent = connected ? 'Connected' : 'Disconnected';
+            document.getElementById('motor-status').textContent = connected ? 'Operational' : 'Offline';
+        }
+        
         /**
          * Function to send the command and speed to the backend server via HTTP POST.
          * The backend will then publish this data to the MQTT broker for the ESP32.
@@ -712,8 +821,7 @@
          * @param {number} speed - The current speed value (0-255).
          */
         function sendToBackend(command, speed) {
-            // IMPORTANT: Change this URL to match your backend server
-            const backendUrl = 'https://car-backend-n2kw.onrender.com';
+            const backendUrl = backendUrlInput.value;
             
             const data = {
                 command: command,
@@ -744,21 +852,21 @@
                 } else {
                     carStatus.textContent = 'Stopped';
                 }
-                document.querySelector('.status-indicator').className = 'status-indicator connected';
+                updateConnectionStatus(true, 'Connected to Car');
                 
             })
             .catch((error) => {
                 // Handle network errors or non-200 responses
                 console.error('Error sending command:', error);
                 addToLog(`ERROR: Failed to send ${getCommandName(command)} command.`);
-                document.querySelector('.status-indicator').className = 'status-indicator disconnected';
+                updateConnectionStatus(false, 'Connection Error');
                 carStatus.textContent = 'Connection Error';
             });
         }
         
         function handleKeyDown(e) {
             // Prevent default behavior for control keys
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'].includes(e.key)) {
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D', 'e', 'E'].includes(e.key)) {
                 e.preventDefault();
             }
             
@@ -794,6 +902,10 @@
                     activeKey = e.key;
                     sendCommand('S');
                     break;
+                case 'e':
+                case 'E':
+                    emergencyStopCar();
+                    break;
             }
         }
         
@@ -803,7 +915,9 @@
                 sendCommand('S');
             }
         }
+        
+        // Load saved settings on page load
+        loadSettings();
     </script>
 </body>
-
 </html>
