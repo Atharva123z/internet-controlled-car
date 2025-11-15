@@ -46,7 +46,7 @@ app.post('/api/command', (req, res) => {
     }
 
     // Format the message for the ESP32 (e.g., "F,150")
-    const message = `${command},${speed}`; 
+    const message = command; 
 
     // Publish the message to the MQTT Broker
     mqttClient.publish(MQTT_TOPIC, message, { qos: 0, retain: false }, (err) => {
@@ -66,4 +66,5 @@ app.post('/api/command', (req, res) => {
 app.listen(port, () => {
     console.log(`🚀 Backend Server Running! Listen on http://localhost:${port}`);
     console.log(`MQTT Topic: ${MQTT_TOPIC}`);
+
 });
